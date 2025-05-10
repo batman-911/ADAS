@@ -1,7 +1,11 @@
+import sys
+import os
+ROOT_DIR = ""
+sys.path.append(ROOT_DIR)
+
 import argparse
 import cv2
-import os
-import json
+
 
 from src.perception.stereo_camera import StereoCameraModel
 from src.perception.lane_detection import LaneDetector
@@ -12,6 +16,7 @@ from src.decision.path_planning import PathPlanner
 from src.utils.visualizer import show_result
 from src.utils.logger import log_decision
 from src.utils.calibration import run_stereo_calibration
+from config.config import Config
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Level 3 ADAS CLI")
@@ -22,12 +27,14 @@ def parse_args():
 
 class ADAS:
     def __init__(self, args):
-        self.stereo_camera = StereoCameraModel()
-        self.lane_detector = LaneDetector()
-        self.object_detector = ObjectDetector3D()
-        self.object_tracker = ObjectTracker()
-        self.trajectory_predictor = TrajectoryPredictor()
-        self.path_planner = PathPlanner()
+        self.config = Config()
+
+        self.stereo_camera = StereoCameraModel(self.config)
+        self.lane_detector = LaneDetector(self.config)
+        self.object_detector = ObjectDetector3D(self.config)
+        self.object_tracker = ObjectTracker(self.config)
+        self.trajectory_predictor = TrajectoryPredictor(self.config)
+        self.path_planner = PathPlanner(self.config)
 
         self.left_cap = cv2.VideoCapture(args.left)
         self.right_cap = cv2.VideoCapture(args.right)

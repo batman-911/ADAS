@@ -1,0 +1,24 @@
+device: "auto"  # auto or 'cuda', 'cpu', 'mps' (for mac)
+
+perception:
+  lane_detection:
+    params:
+      num_outputs: 35 # (5 lanes) * (1 conf + 2 (upper & lower) + 4 poly coeffs)
+      pretrained: true
+      backbone: 'efficientnet-b1'
+      pred_category: false
+      curriculum_steps: [0, 0, 0, 0]
+    model_path: "weights/model_2695.pt"
+    conf_threshold: 0.5
+
+  object_detection:
+    model_type: "PointRCNN"
+    checkpoint: "weights/point_rcnn.pth"
+
+
+decision:
+  path_planning:
+    max_speed: 3.0  # m/s
+    min_distance: 2.0  # meters
+    max_acceleration: 1.5  # m/s^2
+    max_deceleration: 3.0  # m/s^2
