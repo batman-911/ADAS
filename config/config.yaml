@@ -2,14 +2,17 @@ device: "auto"  # auto or 'cuda', 'cpu', 'mps' (for mac)
 
 perception:
   lane_detection:
-    params:
-      num_outputs: 35 # (5 lanes) * (1 conf + 2 (upper & lower) + 4 poly coeffs)
-      pretrained: true
-      backbone: 'efficientnet-b1'
-      pred_category: false
-      curriculum_steps: [0, 0, 0, 0]
-    model_path: "weights/model_2695.pt"
-    conf_threshold: 0.5
+    model_path: "weights/tusimple_r18.onnx"
+    # inference:
+    conf_threshold: 0.4        # How confident the model must be to keep a detection
+    nms_threshold: 50          # Threshold for non-maximum suppression
+    max_lanes: 5               # Max number of lanes to return
+    # image:
+    input_width: 800           # Model input width
+    input_height: 320          # Model input height
+    original_width: 1280       # Original image width (from your camera or dataset)
+    original_height: 720       # Original image height
+    cut_height: 160            # How many pixels to cut from the bottom (for inference)
 
   object_detection:
     model_type: "PointRCNN"

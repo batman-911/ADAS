@@ -4,8 +4,8 @@ import os
 import yaml
 
 # Define the chessboard dimensions (number of internal corners per row and column)
-CHESSBOARD_ROWS = 6
-CHESSBOARD_COLS = 9
+CHESSBOARD_ROWS = 7
+CHESSBOARD_COLS = 10
 CHESSBOARD_SIZE = (CHESSBOARD_COLS, CHESSBOARD_ROWS)
 
 # Define the square size in the real world (e.g., in cm or meters, depending on your chessboard)

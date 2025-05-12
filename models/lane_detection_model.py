@@ -1,169 +1,309 @@
-import torch
-import torch.nn as nn
-from torchvision.models import resnet34, resnet50, resnet101, ResNet50_Weights, ResNet34_Weights, ResNet101_Weights
-from efficientnet_pytorch import EfficientNet
+import os
+import sys
+import cv2
+import numpy as np
+import onnxruntime
+from scipy.interpolate import InterpolatedUnivariateSpline
+
+COLORS = [
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (255, 255, 0),
+    (255, 0, 255),
+    (0, 255, 255),
+    (128, 255, 0),
+    (255, 128, 0),
+    (128, 0, 255),
+    (255, 0, 128),
+    (0, 128, 255),
+    (0, 255, 128),
+    (128, 255, 255),
+    (255, 128, 255),
+    (255, 255, 128),
+    (60, 180, 0),
+    (180, 60, 0),
+    (0, 60, 180),
+    (0, 180, 60),
+    (60, 0, 180),
+    (180, 0, 60),
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (255, 255, 0),
+    (255, 0, 255),
+    (0, 255, 255),
+    (128, 255, 0),
+    (255, 128, 0),
+    (128, 0, 255),
+]
+
+class Lane:
+    def __init__(self, points=None, invalid_value=-2., metadata=None):
+        super(Lane, self).__init__()
+        self.curr_iter = 0
+        self.points = points
+        self.invalid_value = invalid_value
+        self.function = InterpolatedUnivariateSpline(points[:, 1],
+                                                     points[:, 0],
+                                                     k=min(3,
+                                                           len(points) - 1))
+        self.min_y = points[:, 1].min() - 0.01
+        self.max_y = points[:, 1].max() + 0.01
+
+        self.metadata = metadata or {}
+
+        self.sample_y = range(710, 150, -10)
+        self.ori_img_w = 1280
+        self.ori_img_h = 720
+
+    def __repr__(self):
+        return '[Lane]\n' + str(self.points) + '\n[/Lane]'
+
+    def __call__(self, lane_ys):
+        lane_xs = self.function(lane_ys)
+
+        lane_xs[(lane_ys < self.min_y) |
+                (lane_ys > self.max_y)] = self.invalid_value
+        return lane_xs
+
+    def to_array(self):
+        sample_y = self.sample_y
+        img_w, img_h = self.ori_img_w, self.ori_img_h
+        ys = np.array(sample_y) / float(img_h)
+        xs = self(ys)
+        valid_mask = (xs >= 0) & (xs < 1)
+        lane_xs = xs[valid_mask] * img_w
+        lane_ys = ys[valid_mask] * img_h
+        lane = np.concatenate((lane_xs.reshape(-1, 1), lane_ys.reshape(-1, 1)),
+                              axis=1)
+        return lane
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.curr_iter < len(self.points):
+            self.curr_iter += 1
+            return self.points[self.curr_iter - 1]
+        self.curr_iter = 0
+        raise StopIteration
 
 
-class OutputLayer(nn.Module):
-    def __init__(self, fc, num_extra):
-        super(OutputLayer, self).__init__()
-        self.regular_outputs_layer = fc
-        self.num_extra = num_extra
-        if num_extra > 0:
-            self.extra_outputs_layer = nn.Linear(fc.in_features, num_extra)
 
-    def forward(self, x):
-        regular_outputs = self.regular_outputs_layer(x)
-        if self.num_extra > 0:
-            extra_outputs = self.extra_outputs_layer(x)
-        else:
-            extra_outputs = None
+class CLRNetDemo():
+    def __init__(self, model_path, conf_threshold, nms_threshold, max_lanes,
+                 input_width, input_height, original_width, original_height, cut_height):
+        # Model
+        self.ort_session = onnxruntime.InferenceSession(model_path)
 
-        return regular_outputs, extra_outputs
+        # Inference settings
+        self.conf_threshold = conf_threshold
+        self.nms_thres = nms_threshold
+        self.max_lanes = max_lanes
+
+        # Image settings
+        self.input_width = input_width
+        self.input_height = input_height
+        self.ori_img_w = original_width
+        self.ori_img_h = original_height
+        self.cut_height = cut_height
+        self.img_w = original_width
+        self.img_h = original_height
+
+        # Lane-related constants (fixed for now)
+        self.sample_points = 36
+        self.num_points = 72
+        self.n_offsets = 72
+        self.n_strips = 71
+
+        # Prior feature computation
+        self.sample_x_indexs = np.linspace(0, 1, self.sample_points) * self.n_strips
+        self.prior_feat_ys = np.flip(1 - self.sample_x_indexs / self.n_strips)
+        self.prior_ys = np.linspace(1, 0, self.n_offsets)
+    
+    def softmax(self, x, axis=None):
+        x = x - x.max(axis=axis, keepdims=True)
+        y = np.exp(x)
+        return y / y.sum(axis=axis, keepdims=True)
 
 
-class PolyRegression(nn.Module):
-    def __init__(self,
-                 num_outputs,
-                 backbone,
-                 pretrained,
-                 curriculum_steps=None,
-                 extra_outputs=0,
-                 share_top_y=True,
-                 pred_category=False):
-        super(PolyRegression, self).__init__()
-        if 'efficientnet' in backbone:
-            if pretrained:
-                self.model = EfficientNet.from_pretrained(backbone, num_classes=num_outputs)
+    def Lane_nms(self, proposals,scores,overlap=50, top_k=4):
+        keep_index = []
+        sorted_score = np.sort(scores)[-1] # from big to small 
+        indices = np.argsort(-scores) # from big to small 
+        
+        r_filters = np.zeros(len(scores))
+
+        for i,indice in enumerate(indices):
+            if r_filters[i]==1: # continue if this proposal is filted by nms before
+                continue
+            keep_index.append(indice)
+            if len(keep_index)>top_k: # break if more than top_k
+                break
+            if i == (len(scores)-1):# break if indice is the last one
+                break
+            sub_indices = indices[i+1:]
+            for sub_i,sub_indice in enumerate(sub_indices):
+                r_filter = self.Lane_IOU(proposals[indice,:],proposals[sub_indice,:],overlap)
+                if r_filter: r_filters[i+1+sub_i]=1 
+        num_to_keep = len(keep_index)
+        keep_index = list(map(lambda x: x.item(), keep_index))
+        return keep_index, num_to_keep
+    
+    def Lane_IOU(self, parent_box, compared_box, threshold):
+        '''
+        calculate distance one pair of proposal lines
+        return True if distance less than threshold 
+        '''
+        n_offsets=72
+        n_strips = n_offsets - 1
+
+        start_a = (parent_box[2] * n_strips + 0.5).astype(int) # add 0.5 trick to make int() like round  
+        start_b = (compared_box[2] * n_strips + 0.5).astype(int)
+        start = max(start_a,start_b)
+        end_a = start_a + parent_box[4] - 1 + 0.5 - (((parent_box[4] - 1)<0).astype(int))
+        end_b = start_b + compared_box[4] - 1 + 0.5 - (((compared_box[4] - 1)<0).astype(int))
+        end = min(min(end_a,end_b),71)
+        if (end - start)<0:
+            return False
+        dist = 0
+        for i in range(5+start,5 + end.astype(int)):
+            if i>(5+end):
+                 break
+            if parent_box[i] < compared_box[i]:
+                dist += compared_box[i] - parent_box[i]
             else:
-                self.model = EfficientNet.from_name(backbone, override_params={'num_classes': num_outputs})
-            self.model._fc = OutputLayer(self.model._fc, extra_outputs)
-        elif backbone == 'resnet34':
-            if pretrained:
-                self.model = resnet34(weights=ResNet34_Weights.IMAGENET1K_V1)
-            else:
-                self.model = resnet34(weights=None)
-            self.model.fc = nn.Linear(self.model.fc.in_features, num_outputs)
-            self.model.fc = OutputLayer(self.model.fc, extra_outputs)
-        elif backbone == 'resnet50':
-            if pretrained:
-                self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-            else:
-                self.model = resnet50(weights=None)
-            self.model.fc = nn.Linear(self.model.fc.in_features, num_outputs)
-            self.model.fc = OutputLayer(self.model.fc, extra_outputs)
-        elif backbone == 'resnet101':
-            if pretrained:
-                self.model = resnet101(weights=ResNet101_Weights.IMAGENET1K_V1)
-            else:
-                self.model = resnet101(weights=None)
-            self.model.fc = nn.Linear(self.model.fc.in_features, num_outputs)
-            self.model.fc = OutputLayer(self.model.fc, extra_outputs)
-        else:
-            raise NotImplementedError()
+                dist += parent_box[i] - compared_box[i]
+        return dist < (threshold * (end - start + 1))
 
-        self.curriculum_steps = [0, 0, 0, 0] if curriculum_steps is None else curriculum_steps
-        self.share_top_y = share_top_y
-        self.extra_outputs = extra_outputs
-        self.pred_category = pred_category
-        self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x, epoch=None, **kwargs):
-        output, extra_outputs = self.model(x, **kwargs)
-        for i in range(len(self.curriculum_steps)):
-            if epoch is not None and epoch < self.curriculum_steps[i]:
-                output[:, -len(self.curriculum_steps) + i] = 0
-        return output, extra_outputs
+    def predictions_to_pred(self, predictions):
+        lanes = []
+        for lane in predictions:
+            lane_xs = lane[6:]  # normalized value
+            start = min(max(0, int(round(lane[2].item() * self.n_strips))),
+                        self.n_strips)
+            length = int(round(lane[5].item()))
+            end = start + length - 1
+            end = min(end, len(self.prior_ys) - 1)
+            # end = label_end
+            # if the prediction does not start at the bottom of the image,
+            # extend its prediction until the x is outside the image
+            mask = ~((((lane_xs[:start] >= 0.) & (lane_xs[:start] <= 1.)
+                       )[::-1].cumprod()[::-1]).astype(np.bool))
 
-    def decode(self, all_outputs, labels, conf_threshold=0.5):
-        outputs, extra_outputs = all_outputs
-        if extra_outputs is not None:
-            extra_outputs = extra_outputs.reshape(labels.shape[0], 5, -1)
-            extra_outputs = extra_outputs.argmax(dim=2)
-        outputs = outputs.reshape(len(outputs), -1, 7)  # score + upper + lower + 4 coeffs = 7
-        outputs[:, :, 0] = self.sigmoid(outputs[:, :, 0])
-        outputs[outputs[:, :, 0] < conf_threshold] = 0
+            lane_xs[end + 1:] = -2
+            lane_xs[:start][mask] = -2
+            lane_ys = self.prior_ys[lane_xs >= 0]
+            lane_xs = lane_xs[lane_xs >= 0]
 
-        if False and self.share_top_y:
-            outputs[:, :, 0] = outputs[:, 0, 0].expand(outputs.shape[0], outputs.shape[1])
+            lane_xs = np.double(lane_xs)
+            lane_xs = np.flip(lane_xs, axis=0)
+            lane_ys = np.flip(lane_ys, axis=0)
+            lane_ys = (lane_ys * (self.ori_img_h - self.cut_height) +
+                       self.cut_height) / self.ori_img_h
+            if len(lane_xs) <= 1:
+                continue
 
-        return outputs, extra_outputs
+            points = np.stack(
+                (lane_xs.reshape(-1, 1), lane_ys.reshape(-1, 1)),
+                axis=1).squeeze(2)
 
-    def loss(self,
-             outputs,
-             target,
-             conf_weight=1,
-             lower_weight=1,
-             upper_weight=1,
-             cls_weight=1,
-             poly_weight=300,
-             threshold=15 / 720.):
-        pred, extra_outputs = outputs
-        bce = nn.BCELoss()
-        mse = nn.MSELoss()
-        s = nn.Sigmoid()
-        threshold = nn.Threshold(threshold**2, 0.)
-        pred = pred.reshape(-1, target.shape[1], 1 + 2 + 4)
-        target_categories, pred_confs = target[:, :, 0].reshape((-1, 1)), s(pred[:, :, 0]).reshape((-1, 1))
-        target_uppers, pred_uppers = target[:, :, 2].reshape((-1, 1)), pred[:, :, 2].reshape((-1, 1))
-        target_points, pred_polys = target[:, :, 3:].reshape((-1, target.shape[2] - 3)), pred[:, :, 3:].reshape(-1, 4)
-        target_lowers, pred_lowers = target[:, :, 1], pred[:, :, 1]
+            lane = Lane(points=points,
+                        metadata={
+                            'start_x': lane[3],
+                            'start_y': lane[2],
+                            'conf': lane[1]
+                        })
+            lanes.append(lane)
+        return lanes
 
-        if self.share_top_y:
-            # inexistent lanes have -1e-5 as lower
-            # i'm just setting it to a high value here so that the .min below works fine
-            target_lowers[target_lowers < 0] = 1
-            target_lowers[...] = target_lowers.min(dim=1, keepdim=True)[0]
-            pred_lowers[...] = pred_lowers[:, 0].reshape(-1, 1).expand(pred.shape[0], pred.shape[1])
+    def get_lanes(self, output, as_lanes=True):
+        '''
+        Convert model output to lanes.
+        '''
+        decoded = []
+        for predictions in output:
+            # filter out the conf lower than conf threshold
+            scores = self.softmax(predictions[:, :2], 1)[:, 1]
 
-        target_lowers = target_lowers.reshape((-1, 1))
-        pred_lowers = pred_lowers.reshape((-1, 1))
+            keep_inds = scores >= self.conf_threshold
+            predictions = predictions[keep_inds]
+            scores = scores[keep_inds]
 
-        target_confs = (target_categories > 0).float()
-        valid_lanes_idx = target_confs == 1
-        valid_lanes_idx_flat = valid_lanes_idx.reshape(-1)
-        lower_loss = mse(target_lowers[valid_lanes_idx], pred_lowers[valid_lanes_idx])
-        upper_loss = mse(target_uppers[valid_lanes_idx], pred_uppers[valid_lanes_idx])
+            if predictions.shape[0] == 0:
+                decoded.append([])
+                continue
+            nms_predictions = predictions
 
-        # classification loss
-        if self.pred_category and self.extra_outputs > 0:
-            ce = nn.CrossEntropyLoss()
-            pred_categories = extra_outputs.reshape(target.shape[0] * target.shape[1], -1)
-            target_categories = target_categories.reshape(pred_categories.shape[:-1]).long()
-            pred_categories = pred_categories[target_categories > 0]
-            target_categories = target_categories[target_categories > 0]
-            cls_loss = ce(pred_categories, target_categories - 1)
-        else:
-            cls_loss = 0
+            nms_predictions = np.concatenate(
+                [nms_predictions[..., :4], nms_predictions[..., 5:]], axis=-1)
+    
+            nms_predictions[..., 4] = nms_predictions[..., 4] * self.n_strips
+            nms_predictions[...,
+                            5:] = nms_predictions[..., 5:] * (self.img_w - 1)
+            
+            
+            keep, num_to_keep = self.Lane_nms( 
+                nms_predictions,
+                scores,
+                self.nms_thres,
+                self.max_lanes)
 
-        # poly loss calc
-        target_xs = target_points[valid_lanes_idx_flat, :target_points.shape[1] // 2]
-        ys = target_points[valid_lanes_idx_flat, target_points.shape[1] // 2:].t()
-        valid_xs = target_xs >= 0
-        pred_polys = pred_polys[valid_lanes_idx_flat]
-        pred_xs = pred_polys[:, 0] * ys**3 + pred_polys[:, 1] * ys**2 + pred_polys[:, 2] * ys + pred_polys[:, 3]
-        pred_xs.t_()
-        weights = (torch.sum(valid_xs, dtype=torch.float32) / torch.sum(valid_xs, dim=1, dtype=torch.float32))**0.5
-        pred_xs = (pred_xs.t_() *
-                   weights).t()  # without this, lanes with more points would have more weight on the cost function
-        target_xs = (target_xs.t_() * weights).t()
-        poly_loss = mse(pred_xs[valid_xs], target_xs[valid_xs]) / valid_lanes_idx.sum()
-        poly_loss = threshold(
-            (pred_xs[valid_xs] - target_xs[valid_xs])**2).sum() / (valid_lanes_idx.sum() * valid_xs.sum())
+            keep = keep[:num_to_keep]
+            predictions = predictions[keep]
 
-        # applying weights to partial losses
-        poly_loss = poly_loss * poly_weight
-        lower_loss = lower_loss * lower_weight
-        upper_loss = upper_loss * upper_weight
-        cls_loss = cls_loss * cls_weight
-        conf_loss = bce(pred_confs, target_confs) * conf_weight
+            if predictions.shape[0] == 0:
+                decoded.append([])
+                continue
 
-        loss = conf_loss + lower_loss + upper_loss + poly_loss + cls_loss
+            predictions[:, 5] = np.round(predictions[:, 5] * self.n_strips)
+            pred = self.predictions_to_pred(predictions)
+            decoded.append(pred)
+            
+        return decoded
+    
+    def imshow_lanes(self, img, lanes, show=False, out_file=None, width=4):
+        lanes = [lane.to_array() for lane in lanes]
+        
+        lanes_xys = []
+        for _, lane in enumerate(lanes):
+            xys = []
+            for x, y in lane:
+                if x <= 0 or y <= 0:
+                    continue
+                x, y = int(x), int(y)
+                xys.append((x, y))
+            lanes_xys.append(xys)
+        lanes_xys.sort(key=lambda xys : xys[0][0])
 
-        return loss, {
-            'conf': conf_loss,
-            'lower': lower_loss,
-            'upper': upper_loss,
-            'poly': poly_loss,
-            'cls_loss': cls_loss
-        }
+        for idx, xys in enumerate(lanes_xys):
+            for i in range(1, len(xys)):
+                cv2.line(img, xys[i - 1], xys[i], COLORS[idx], thickness=width)
+        return img
+   
+    def forward(self, img):
+        img_ = img.copy()
+        h, w = img.shape[:2]
+        img = img[self.cut_height:, :, :]
+        img = cv2.resize(img, (self.input_width, self.input_height), cv2.INTER_CUBIC)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) 
+        img = img.astype(np.float32) / 255.0 
+
+        img = np.transpose(np.float32(img[:,:,:,np.newaxis]), (3,2,0,1))
+
+        ort_inputs = {self.ort_session.get_inputs()[0].name: img}
+        ort_outs = self.ort_session.run(None, ort_inputs)
+        output = ort_outs[0]
+        
+        output = self.get_lanes(output)
+        res = self.imshow_lanes(img_, output[0])
+        return output, res
+
+if __name__ == "__main__":
+
+    clr = CLRNetDemo('weights/tusimple_r18.onnx')
+    img = cv2.imread('./test.jpg')
+    output, res = clr.forward(img)
+    cv2.imwrite('data/image_2/000000_10.png', res)

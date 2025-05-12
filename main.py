@@ -1,8 +1,3 @@
-import sys
-import os
-ROOT_DIR = ""
-sys.path.append(ROOT_DIR)
-
 import argparse
 import cv2
 
