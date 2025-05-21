@@ -24,7 +24,21 @@ This system is designed for easy integration into robotics platforms, simulators
 
 ## 📁 Project Structure
 
-```ADAS/ ├── config/ # YAML configuration files ├── data/ # Input data (e.g., KITTI) ├── models/ # Pre-trained or custom models ├── src/ # Source code (perception, decision, visualization) │ ├── perception/ │ ├── decision/ │ └── visualization/ ├── weights/ # Model weights ├── main.py # Main pipeline launcher ├── setup.sh # Installation script ├── requirements.txt # Python dependencies └── README.md # Project documentation```
+```text
+ADAS/
+├── config/            # YAML configuration files
+├── data/              # Input data (e.g., KITTI)
+├── models/            # Pre-trained or custom models
+├── src/               # Source code (perception, decision, visualization)
+│   ├── perception/
+│   ├── decision/
+│   └── visualization/
+├── weights/           # Model weights
+├── main.py           # Main pipeline launcher
+├── setup.sh          # Installation script
+├── requirements.txt  # Python dependencies
+└── README.md         # Project documentation
+```
 
 
 
