@@ -40,8 +40,6 @@ ADAS/
 └── README.md         # Project documentation
 ```
 
-
-
 ---
 
 ## 🔧 Installation
@@ -53,6 +51,7 @@ cd ADAS
 
 # Set up the Python environment and install dependencies
 bash setup.sh
+```
 
 ---
 
