@@ -53,3 +53,17 @@ cd ADAS
 
 # Set up the Python environment and install dependencies
 bash setup.sh
+
+---
+
+## 📁 Dataset
+
+Use datasets like [KITTI](http://www.cvlibs.net/datasets/kitti/) and place them under `data/`.
+Make sure calibration files are available for stereo modules.
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file.
+
