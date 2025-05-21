@@ -7,7 +7,7 @@
 
 ## 📜 Description
 
-This project implements a **Level 1 Advanced Driver Assistance System (ADAS)** using only stereo cameras, eliminating the need for physical LiDAR sensor. By employing a **pseudo-LiDAR approach**, it reconstructs the 3D environment from stereo images with multiple advanced perception modules.
+This project implements a **Level 3 Advanced Driver Assistance System (ADAS)** using only stereo cameras, eliminating the need for physical LiDAR sensor. By employing a **pseudo-LiDAR approach**, it reconstructs the 3D environment from stereo images with multiple advanced perception modules.
 
 ### Key Features:
 
@@ -20,6 +20,24 @@ This project implements a **Level 1 Advanced Driver Assistance System (ADAS)** u
 
 This system is designed for easy integration into robotics platforms, simulators, or real-world vehicles using only stereo vision for cost-effective and flexible ADAS development.
 
+---
+
+## 🔧 Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/batman-911/ADAS.git
+cd ADAS
+
+# Create and activate venv
+python -m venv adas-env
+source adas-env/bin/activate  # Linux/Mac
+# OR
+adas-env\Scripts\activate    # Windows
+
+# Set up the Python environment and install dependencies
+bash setup.sh
+```
 ---
 
 ## 📁 Project Structure
@@ -42,23 +60,15 @@ ADAS/
 
 ---
 
-## 🔧 Installation
+## Run demo
 
 ```bash
-# Clone the repository
-git clone https://github.com/batman-911/ADAS.git
-cd ADAS
+# Basic stereo video processing
+python main.py --left data/left.avi --right data/right.avi
 
-# Create and activate venv
-python -m venv adas-env
-source adas-env/bin/activate  # Linux/Mac
-# OR
-adas-env\Scripts\activate    # Windows
-
-# Set up the Python environment and install dependencies
-bash setup.sh
+# Stereo calibration mode (optional)
+python main.py --left calibration_images/left/ --right calibration_images/right/ --calibrate
 ```
-
 ---
 
 ## 📁 Dataset
