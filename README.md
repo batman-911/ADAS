@@ -7,7 +7,7 @@
 
 ## 📜 Description
 
-This project implements a **Level 3 Advanced Driver Assistance System (ADAS)** using only stereo cameras, eliminating the need for physical LiDAR sensor. By employing a **pseudo-LiDAR approach**, it reconstructs the 3D environment from stereo images with multiple advanced perception modules.
+This project implements a **Level 1 Advanced Driver Assistance System (ADAS)** using only stereo cameras, eliminating the need for physical LiDAR sensor. By employing a **pseudo-LiDAR approach**, it reconstructs the 3D environment from stereo images with multiple advanced perception modules.
 
 ### Key Features:
 
