@@ -49,6 +49,12 @@ ADAS/
 git clone https://github.com/batman-911/ADAS.git
 cd ADAS
 
+# Create and activate venv
+python -m venv adas-env
+source adas-env/bin/activate  # Linux/Mac
+# OR
+adas-env\Scripts\activate    # Windows
+
 # Set up the Python environment and install dependencies
 bash setup.sh
 ```
