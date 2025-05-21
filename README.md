@@ -19,8 +19,5 @@
 git clone https://github.com/batman-911/ADAS.git
 cd ADAS
 
-# Install dependencies
-pip install -r requirements.txt
-
-# (Optional) Set up environment
+# Set up the Python environment and install dependencies
 bash setup.sh
