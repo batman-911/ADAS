@@ -16,7 +16,6 @@ This project is a **Level 3 Advanced Driver Assistance System (ADAS)** built ent
 - 📦 **3D Object Detection**: Detects and localizes objects (vehicles, pedestrians, etc.) in 3D space using point cloud data.
 - ☁️ **Pseudo-LiDAR Generation**: Converts stereo depth maps into 3D point clouds, simulating LiDAR data.
 - 📷 **Stereo Depth Estimation**: Computes disparity maps from stereo image pairs to infer scene depth.
-- 🧠 **Modular Perception Pipeline**: Fully modular architecture—each module (e.g., lane, object, traffic light detection) can be enabled or disabled independently.
 - 🖼️ **2D/3D Visualization**: Renders results on input images, disparity maps, and 3D point clouds for debugging or real-time display.
 
 This system is designed for easy integration into robotics platforms, simulators, or real-world vehicles using only stereo vision for cost-effective and flexible ADAS development.
@@ -25,6 +24,16 @@ This system is designed for easy integration into robotics platforms, simulators
 
 ## 📁 Project Structure
 
+  ADAS/
+  ├── config/ # YAML configuration files
+  ├── data/ # Input data (e.g., KITTI)
+  ├── models/ # Pre-trained or custom models
+  ├── src/ # Source code (perception, decision, visualization)
+  ├── weights/ # Model weights
+  ├── main.py # Main pipeline launcher
+  ├── setup.sh # Installation script
+  ├── requirements.txt # Python dependencies
+  └── README.md # Project documentation
 
 
 
