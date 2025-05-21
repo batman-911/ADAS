@@ -67,3 +67,4 @@ Make sure calibration files are available for stereo modules.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file.
 
+---
